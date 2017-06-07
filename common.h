@@ -49,7 +49,7 @@ extern "C" {
     
     #define DBGPRINTF(input, ...) \
     { \
-        int rank; \
+        int rank = 0; \
         MPI_Comm_rank(MPI_COMM_WORLD, &rank); \
         if (DEBUG_PRINT < 0 || (rank + 1) == DEBUG_PRINT) \
             fprintf(stderr, PREFIX input SUFFIX, rank, __FILE__, __LINE__, __func__, __VA_ARGS__); \
@@ -57,7 +57,7 @@ extern "C" {
     
     #define DBGPRINT(input) \
     { \
-        int rank; \
+        int rank = 0; \
         MPI_Comm_rank(MPI_COMM_WORLD, &rank); \
         if (DEBUG_PRINT < 0 || (rank + 1) == DEBUG_PRINT) \
             fprintf(stderr, PREFIX input SUFFIX, rank, __FILE__, __LINE__, __func__); \

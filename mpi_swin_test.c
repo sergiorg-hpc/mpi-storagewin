@@ -12,17 +12,23 @@ int createDefaultInfo(int rank, size_t offset_orig, MPI_Info* info)
 {
     char filename[PATH_MAX];
     char offset[PATH_MAX];
+    char file_perm[PATH_MAX];
     
     // Define the path according to the rank of the process
-    sprintf(filename, "./pgasio_mpi_%d.tmp", rank);
-    sprintf(offset, "%zu", offset_orig);
+    sprintf(filename,  "./mpi_swin_%d.win", rank);
+    sprintf(offset,    "%zu", offset_orig);
+    sprintf(file_perm, "%d", (S_IRUSR | S_IWUSR));
 
     CHK(MPI_Info_create(info));
-    CHK(MPI_Info_set(*info, MPI_SWIN_ENABLED,  "true"));
-    //CHK(MPI_Info_set(*info, MPI_SWIN_DEVICEID, "921"));
-    CHK(MPI_Info_set(*info, MPI_SWIN_FILENAME, filename));
-    CHK(MPI_Info_set(*info, MPI_SWIN_OFFSET,   offset));
-    CHK(MPI_Info_set(*info, MPI_SWIN_UNLINK,   "false"));
+    CHK(MPI_Info_set(*info, MPI_SWIN_ALLOC_TYPE,    "storage"));
+    // CHK(MPI_Info_set(*info, MPI_SWIN_DEVICEID,      "921"));
+    CHK(MPI_Info_set(*info, MPI_SWIN_FILENAME,      filename));
+    CHK(MPI_Info_set(*info, MPI_SWIN_OFFSET,        offset));
+    CHK(MPI_Info_set(*info, MPI_SWIN_UNLINK,        "false"));
+    CHK(MPI_Info_set(*info, MPI_IO_ACCESS_STYLE,    "write_mostly"));
+    CHK(MPI_Info_set(*info, MPI_IO_FILE_PERM,       file_perm));
+    CHK(MPI_Info_set(*info, MPI_IO_STRIPING_FACTOR, "2"));
+    CHK(MPI_Info_set(*info, MPI_IO_STRIPING_UNIT,   "65536"));
     
     return MPI_SUCCESS;
 }
@@ -36,10 +42,11 @@ int createDefaultInfo(int rank, size_t offset_orig, MPI_Info* info)
  */
 int main (int argc, char *argv[])
 {
-    MPI_Win win;
-    MPI_Info info = MPI_INFO_NULL;
-    int rank, num_procs;
-    int *baseptr;
+    MPI_Win  win       = MPI_WIN_NULL;
+    MPI_Info info      = MPI_INFO_NULL;
+    int      rank      = 0;
+    int      num_procs = 0;
+    int      *baseptr  = NULL;
     
     // Initialize MPI and retrieve the rank of the process
     CHKPRINT(MPI_Init(&argc, &argv));
@@ -54,8 +61,9 @@ int main (int argc, char *argv[])
         CHKPRINT(createDefaultInfo(rank, 0, &info));
     }
     
-    // Allocate the window with at least num_procs bytes (i.e., depending on the page size, it can be more)
-    CHKPRINT(MPI_Win_allocate(num_procs*sizeof(int), sizeof(int), info, MPI_COMM_WORLD, (void**)&baseptr, &win));
+    // Allocate the window with "num_procs" integers
+    CHKPRINT(MPI_Win_allocate(num_procs * sizeof(int), sizeof(int), info,
+                              MPI_COMM_WORLD, (void**)&baseptr, &win));
     
     // Put some test values on storage-allocated windows
     if (!IS_ODD_NUM(rank))
@@ -75,23 +83,28 @@ int main (int argc, char *argv[])
     // Force all processes to wait before printing the result
     CHKPRINT(MPI_Barrier(MPI_COMM_WORLD));
     
-    if (IS_ODD_NUM(rank))
-    {
-        char  output[PATH_MAX];
-        char *p_output = output;
-        char *p_limit  = p_output + PATH_MAX;
-        
-        for(int i = 0; p_output != p_limit && i < num_procs; i += 2)
-        {
-            p_output += sprintf(p_output, "%d ", baseptr[i]);
-        }
-        
-        printf("Rank %d values from even processes: %s\n", rank, output);
-    }
+    // Synchronize the storage (just to test that this functionality still works)
+    CHKPRINT(MPI_Win_lock(MPI_LOCK_EXCLUSIVE, rank, 0, win));
+    CHKPRINT(MPI_Win_sync(win));
+    CHKPRINT(MPI_Win_unlock(rank, win));
     
-    // The following two calls must fail (i.e., we are not owners of the allocation)
-    //CHKPRINT(MPI_Win_detach(win, baseptr));
-    //CHKPRINT(MPI_Free_mem(baseptr));
+    // Print the result in order
+    for (int i = 0; i < num_procs; i++)
+    {
+        CHKPRINT(MPI_Barrier(MPI_COMM_WORLD));
+        
+        if (IS_ODD_NUM(rank) && rank == i)
+        {
+            printf("Rank %d values from even processes:", rank);
+            
+            for(int j = 0; j < num_procs; j += 2)
+            {
+                printf(" %d", baseptr[j]);
+            }
+            
+            printf("\n");
+        }
+    }
     
     // Release the window and finalize the MPI session
     CHKPRINT(MPI_Win_free(&win)); 

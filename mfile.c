@@ -4,7 +4,8 @@
 
 int g_pagesize = 0;
 
-int mfalloc(char const *filename, size_t offset, size_t length, int unlink, MFILE *mfile)
+int mfalloc(char const *filename, size_t offset, size_t length, int unlink, int access_style,
+            int file_flags, int file_perm, MFILE *mfile)
 {
     int     fd             = 0;
     size_t  offset_aligned = 0;
@@ -16,8 +17,8 @@ int mfalloc(char const *filename, size_t offset, size_t length, int unlink, MFIL
     // Check if the file exists before proceeding
     file_exists = (access(filename, F_OK) == 0);
     
-    // Open / create the file with RW permission, giving the calling user permission
-    fd = open(filename, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+    // Open / create the file with the provided permissions
+    fd = open(filename, file_flags, file_perm);
     CHKB(fd == ERROR);
     
     CHK(fstat(fd, &st));
@@ -53,11 +54,17 @@ int mfalloc(char const *filename, size_t offset, size_t length, int unlink, MFIL
         CHK(ftruncate(fd, offset_aligned + length));
     }
     
-    // Define the mapping given the file descriptor
+    // Define the mapping given the file descriptor and set the access pattern
     if (length > 0)
     {
-        addr = mmap(NULL, length, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED | MAP_NORESERVE, fd, offset_aligned); // Note: MAP_NORESERVE is needed to avoid swapping
+        const int prot = (file_flags & O_RDONLY) ? PROT_READ  :
+                         (file_flags & O_WRONLY) ? PROT_WRITE :
+                                                   (PROT_READ | PROT_WRITE | PROT_EXEC);
+        
+        addr = mmap(NULL, length, prot, MAP_SHARED | MAP_NORESERVE, fd, offset_aligned); // Note: MAP_NORESERVE is needed to avoid swapping
         CHKB(addr == MAP_FAILED);
+        
+        CHK(madvise(addr, length, access_style));
     }
  
     CHK(close(fd));

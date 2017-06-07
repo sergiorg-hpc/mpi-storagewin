@@ -3,6 +3,9 @@
 #include "mfile.h"
 #include "mpiwrappers_util.h"
 #include "mpiwrappers.h"
+//#ifdef MPI_SWIN_LUSTRE
+//#include <lustre/lustreapi.h>
+//#endif
 
 ///////////////////////////////////
 // PRIVATE DEFINITIONS & METHODS //
@@ -15,7 +18,7 @@
 int releaseWinAlloc(MPI_Win_Alloc *win_alloc)
 {
     // Check the type of window allocation before releasing any data
-    if (win_alloc->alloc_type == ALLOCTYPE_STORAGE)
+    if (win_alloc->alloc_type == MPI_WIN_ALLOC_STORAGE)
     {
         MFILE *mfile = (MFILE *)win_alloc->data;
         
@@ -92,7 +95,7 @@ int cacheWinAlloc(MPI_Win win, void* base)
         CHK(MPI_Win_create_keyval(MPI_Win_copy_attr, MPI_Win_release_attr, &win_keyval, NULL));
         CHK(MPI_Win_set_attr(win, win_keyval, (void*)win_alloc));
         
-        DBGPRINTF("Window attribute set with type=%s", ((win_alloc->alloc_type == ALLOCTYPE_MEM) ? "MEM" : "STORAGE"));
+        DBGPRINTF("Window attribute set with type=%s", ((win_alloc->alloc_type == MPI_WIN_ALLOC_MEM) ? "MEM" : "STORAGE"));
         
         CHK(addWinKeyval(win_keyval));
     }
@@ -140,19 +143,46 @@ int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void *baseptr)
     // in traditional RAM memory or storage
     parseInfo(info, &info_values);
     
-    if (info_values.enabled)
+    if (info_values.alloc_type == MPI_WIN_ALLOC_STORAGE)
     {
         MFILE *mfile = NULL;
         
-        DBGPRINTF("Storage allocation requested with filename=\"%s\" (offset=%zu unlink=%d)", info_values.filename, info_values.offset, info_values.unlink);
+        DBGPRINTF("Storage allocation requested with filename=\"%s\" (offset=%zu unlink=%d)", info_values.filename,
+                                                                                              info_values.offset,
+                                                                                              info_values.unlink);
+        
+#ifdef MPI_SWIN_LUSTRE
+        // Set the striping values for the file if it does not exist
+        if (access(info_values.filename, F_OK) == ERROR && (info_values.striping_factor != 0 ||
+                                                            info_values.striping_unit   != 0))
+        {
+            // Note: The Lustre support using the low-level API has been temporary removed after finding
+            //       some compilation issues on a Cray XC40 machine. We will investigate the reasons and
+            //       enable the support when a generic solution is available (e.g., using ioctl).
+            //
+            // int fd = llapi_file_open(info_values.filename, info_values.file_flags, info_values.file_perm,
+            //                          info_values.striping_unit, -1, info_values.striping_factor, 0);
+            // CHKB(fd == ERROR);
+            // CHK(close(fd));
+            
+            char lfs_command[PATH_MAX];
+            
+            sprintf(lfs_command, "lfs setstripe -c %d -s %ld %s", info_values.striping_factor,
+                                                                  info_values.striping_unit,
+                                                                  info_values.filename);
+            
+            CHK(system(lfs_command));
+        }
+#endif
         
         // Create the mapping of the given file into memory
         mfile = (MFILE *)malloc(sizeof(MFILE));
-        CHK(mfalloc(info_values.filename, info_values.offset, size, info_values.unlink, mfile));
+        CHK(mfalloc(info_values.filename, info_values.offset, size, info_values.unlink, info_values.access_style,
+                    info_values.file_flags, info_values.file_perm, mfile));
         
         // Fill the window allocation object with the mapping details (note that
         // the address returned matches the original request and is not aligned)
-        win_alloc->alloc_type = ALLOCTYPE_STORAGE;
+        win_alloc->alloc_type = MPI_WIN_ALLOC_STORAGE;
         win_alloc->data       = mfile;
         *((void**)baseptr)    = mfile->addr_src;
         
@@ -166,7 +196,7 @@ int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void *baseptr)
         CHK(PMPI_Alloc_mem(size, info, (void*)&win_alloc->data));
         
         // Fill the window allocation object with the allocation details
-        win_alloc->alloc_type = ALLOCTYPE_MEM;
+        win_alloc->alloc_type = MPI_WIN_ALLOC_MEM;
         *((void**)baseptr)    = win_alloc->data;
         
         DBGPRINTF("Allocation in memory successful with length=%ld", size);
@@ -220,27 +250,30 @@ int MPI_Win_allocate(MPI_Aint size, int disp_unit, MPI_Info info,
     CHK(getWinAllocFromWin(*win, FALSE, &win_alloc));
     win_alloc->alloc_release = TRUE;
     
-    DBGPRINTF("Window allocated succesfully with type=%s", ((win_alloc->alloc_type == ALLOCTYPE_MEM) ? "MEM" : "STORAGE"));
+    DBGPRINTF("Window allocated succesfully with type=%s", ((win_alloc->alloc_type == MPI_WIN_ALLOC_MEM) ? "MEM" : "STORAGE"));
     
     return MPI_SUCCESS;
 }
 
 int MPI_Win_sync(MPI_Win win)
 {
-    MPI_Win_Alloc **win_allocs  = NULL;
-    int           count         = 0;
-    int           count_storage = 0;
-    int           count_mem     = 0;
+    MPI_Win_Alloc **win_allocs = NULL;
+    int           count        = 0;
     
     DBGPRINT("Window flushing wrapper called");
     
+    CHK(PMPI_Win_sync(win));
+    
     if ((getAllWinAllocFromWin(win, &win_allocs, &count) == MPI_SUCCESS))
     {
+        int count_storage = 0;
+        int count_mem     = 0;
+        
         DBGPRINTF("Window allocations cached in the window (count=%d)", count);
         
         for (int walloc = 0; !(count_storage && count_mem) && walloc < count; walloc++)
         {
-            if (win_allocs[walloc]->alloc_type == ALLOCTYPE_STORAGE)
+            if (win_allocs[walloc]->alloc_type == MPI_WIN_ALLOC_STORAGE)
             {
                 CHK(mfsync(*((MFILE *)win_allocs[walloc]->data)));
                 
@@ -256,15 +289,15 @@ int MPI_Win_sync(MPI_Win win)
         
         free(win_allocs);
         
-        // If we detect allocations in both memory and storage combined, the operation
-        // is not supported and we return an error
+        // If we detect allocations in both memory and storage combined, the result
+        // of the operation is unknown and we should return an error
         if (count_storage && count_mem)
         {
             return MPI_ERR_INTERN;
         }
     }
     
-    return (count_storage) ? MPI_SUCCESS : PMPI_Win_sync(win);
+    return MPI_SUCCESS;
 }
 
 int MPI_Win_attach(MPI_Win win, void *base, MPI_Aint size)

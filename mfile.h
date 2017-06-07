@@ -22,7 +22,8 @@ typedef struct
 /**
  * Allocates a file in storage and creates a map in memory.
  */
-int mfalloc(char const *filename, size_t offset, size_t length, int unlink, MFILE *mfile);
+int mfalloc(char const *filename, size_t offset, size_t length, int unlink, int access_style,
+            int file_flags, int file_perm, MFILE *mfile);
 
 /**
  * Flushes to disk any change made to the mapped file in memory.

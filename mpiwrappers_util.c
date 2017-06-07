@@ -77,8 +77,8 @@ int getInfoValue(MPI_Info info, char* key, char* info_value)
 
 void* getPtrFromWinAlloc(MPI_Win_Alloc *win_alloc)
 {
-    return (win_alloc->alloc_type == ALLOCTYPE_MEM) ? win_alloc->data :
-                                                      ((MFILE *)win_alloc->data)->addr_src;
+    return (win_alloc->alloc_type == MPI_WIN_ALLOC_MEM) ? win_alloc->data :
+                                                          ((MFILE *)win_alloc->data)->addr_src;
 }
 
 
@@ -91,16 +91,26 @@ int parseInfo(MPI_Info info, MPI_Info_Values *values)
     char info_value[MPI_MAX_INFO_VAL];
     
     // Set the default values for the hints
-    values->enabled = FALSE;
-    values->unlink  = FALSE;
-    values->offset  = 0;
+    values->alloc_type      = MPI_WIN_ALLOC_MEM;
+    values->unlink          = FALSE;
+    values->access_style    = MADV_NORMAL;
+    values->file_flags      = O_CREAT | O_RDWR;
+    values->file_perm       = S_IRUSR | S_IWUSR;
+    values->striping_factor = 0;
+    values->striping_unit   = 0;
+    values->offset          = 0;
+    values->filename[0]     = '\0';
     
-    // If we find the "enabled" flag and it's positive, retrieve the settings
-    if (info != MPI_INFO_NULL && getInfoValue(info, MPI_SWIN_ENABLED, info_value) &&
-        !strcmp(info_value, "true"))
+    // If we find the "alloc_type" flag and it's set to "storage", retrieve the settings
+    if (info != MPI_INFO_NULL && getInfoValue(info, MPI_SWIN_ALLOC_TYPE, info_value) &&
+        !strcmp(info_value, "storage"))
     {
         CHKB(!getInfoValue(info, MPI_SWIN_FILENAME, info_value));
         strcpy(values->filename, info_value);
+        
+        // If we reach this point, we have at least the filename for the mapping
+        // and we can enable storage allocations
+        values->alloc_type = MPI_WIN_ALLOC_STORAGE;
         
         if (getInfoValue(info, MPI_SWIN_OFFSET, info_value))
         {
@@ -112,9 +122,40 @@ int parseInfo(MPI_Info info, MPI_Info_Values *values)
             values->unlink = !strcmp(info_value, "true");
         }
         
-        // If we reach this point, we have at least the filename for the mapping
-        // and we can enable storage allocations
-        values->enabled = TRUE;
+        if (getInfoValue(info, MPI_IO_ACCESS_STYLE, info_value))
+        {
+            const int read_once  = (strstr(info_value, "read_once") != NULL);
+            const int write_once = (strstr(info_value, "write_once") != NULL);
+            const int sequential = (strstr(info_value, "sequential") != NULL);
+            const int random     = (strstr(info_value, "random") != NULL);
+            
+            // Note: MPI I/O supports read_once, write_once, read_mostly, write_mostly,
+            // sequential, reverse_sequential and random. However, we can only provide
+            // part of these hints with memory mapped I/O.
+            
+            values->file_flags = O_CREAT | ((read_once)  ? O_RDONLY :
+                                            (write_once) ? O_WRONLY :
+                                                           O_RDWR);
+            
+            values->access_style = (sequential) ? MADV_SEQUENTIAL :
+                                   (random)     ? MADV_RANDOM     :
+                                                  MADV_NORMAL;
+        }
+        
+        if (getInfoValue(info, MPI_IO_FILE_PERM, info_value))
+        {
+            sscanf(info_value, "%d", &values->file_perm);
+        }
+        
+        if (getInfoValue(info, MPI_IO_STRIPING_FACTOR, info_value))
+        {
+            sscanf(info_value, "%d", &values->striping_factor);
+        }
+        
+        if (getInfoValue(info, MPI_IO_STRIPING_UNIT, info_value))
+        {
+            sscanf(info_value, "%ld", &values->striping_unit);
+        }
     }
     
     return MPI_SUCCESS;

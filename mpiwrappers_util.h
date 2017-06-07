@@ -14,34 +14,39 @@ extern "C" {
     int removeWin##S(T win_##SN);
 
 /**
+ * Enumerate that defines the type of allocation associated to the window,
+ * useful to differentiate between memory and storage-based windows.
+ */
+typedef enum
+{
+    MPI_WIN_ALLOC_MEM, MPI_WIN_ALLOC_STORAGE
+} MPI_Win_Alloc_Type;
+
+/**
  * Structure that contains the parsed values of a certain MPI_Info object, in
  * the context of MPI storage windows.
  */
 typedef struct
 {
-    int     enabled;                    // Flag that determines if storage allocation is enabled
+    int     alloc_type;                 // Flag that determines the type of window allocation
     int     unlink;                     // Flag that determines if the mapped file has to be deleted afterwards
-    size_t  offset;                     // Offset within the file where the mapping begins
-    char    filename[MPI_MAX_INFO_VAL]; // Requested filename for the mapped file (including path)
+    int     access_style;               // Access pattern of the mapping (e.g., sequential accesses)
+    int     file_flags;                 // Flags defined while opening the mapping (e.g., read-only)
+    int     file_perm;                  // File permission for new mapped files
+    int     striping_factor;            // Stripe count used for new mapped files
+    long    striping_unit;              // Size of the stripes used for new mapped files
+    size_t  offset;                     // Offset within the file or block device where the mapping begins
+    char    filename[MPI_MAX_INFO_VAL]; // Requested filename for the mapped file or block device (full path)
 } MPI_Info_Values;
-
-/**
- * Enumerate that defines the type of storage associated to the allocated window,
- * useful to differentiate between memory-based and storage-based windows.
- */
-typedef enum
-{
-    ALLOCTYPE_MEM, ALLOCTYPE_STORAGE
-} MPI_Win_Alloc_Type;
 
 /**
  * Structure that represents the associated allocated data of a certain window.
  */
 typedef struct
 {
-    MPI_Win_Alloc_Type alloc_type;      // Type of the allocation
-    int                alloc_release;   // Flag that determines if the allocation must be released
-    void               *data;           // Data allocated for the window
+    int     alloc_type;      // Type of the allocation
+    int     alloc_release;   // Flag that determines if the allocation must be released (i.e., ownership check)
+    void    *data;           // Data allocated to the window
 } MPI_Win_Alloc;
 
 /**
