@@ -28,7 +28,7 @@ Nonetheless, below is illustrated a snippet that allocates a window by providing
 ```
 // Define the MPI_Info object to enable storage allocations 
 MPI_Info_create(&info); 
-MPI_Info_set(info, "storage_alloc", "true");
+MPI_Info_set(info, "alloc_type", "storage");
 MPI_Info_set(info, "storage_alloc_filename", "/path/to/file"); 
 MPI_Info_set(info, "storage_alloc_offset", "0");
 MPI_Info_set(info, "storage_alloc_unlink", "false"); 
