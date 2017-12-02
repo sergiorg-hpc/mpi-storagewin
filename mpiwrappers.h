@@ -55,6 +55,12 @@ int MPI_Win_attach(MPI_Win win, void *base, MPI_Aint size);
  */
 int MPI_Win_detach(MPI_Win win, const void *base);
 
+/**
+ * Wrapper of the original MPI_Init_thread that prevents the use of the library
+ * on multithreaded applications (i.e., the implementation is not thread-safe).
+ */
+int MPI_Init_thread(int *argc, char ***argv, int required, int *provided);
+
 #ifdef __cplusplus
 }
 #endif

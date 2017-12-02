@@ -16,14 +16,15 @@ typedef struct
     size_t length;      // Length of the mapping
     int    unlink;      // Flag that determines if the file has to be deleted
     void*  addr;        // Address in memory of the mapping
-    void*  addr_src;    // Address in memory of the mapping, as requested (unaligned)
+    void*  addr_src;    // Address in memory of the mapping (unaligned)
 } MFILE;
 
 /**
  * Allocates a file in storage and creates a map in memory.
  */
-int mfalloc(char const *filename, size_t offset, size_t length, int unlink, int access_style,
-            int file_flags, int file_perm, MFILE *mfile);
+int mfalloc(char const *filename, size_t offset, size_t length, double factor,
+            int unlink, int access_style, int file_flags, int file_perm,
+            MFILE *mfile);
 
 /**
  * Flushes to disk any change made to the mapped file in memory.
@@ -31,7 +32,8 @@ int mfalloc(char const *filename, size_t offset, size_t length, int unlink, int 
 int mfsync(MFILE mfile);
 
 /**
- * Flushes to disk any change made to the mapped file in memory within the specified range.
+ * Flushes to disk any change made to the mapped file in memory within the
+ * specified range.
  */
 int mfsync_at(MFILE mfile, size_t offset, size_t length, int async);
 

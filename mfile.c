@@ -2,10 +2,17 @@
 #include "common.h"
 #include "mfile.h"
 
-int g_pagesize = 0;
+#define MMAP_PROT  (PROT_READ  | PROT_WRITE | PROT_EXEC)
+#define MMAP_FLAGS (MAP_SHARED | MAP_NORESERVE) // Note: MAP_NORESERVE is
+                                                // needed to avoid swapping
 
-int mfalloc(char const *filename, size_t offset, size_t length, int unlink, int access_style,
-            int file_flags, int file_perm, MFILE *mfile)
+size_t g_pagesize = 0;
+
+#define ALIGN_OFFSET(offset) (((offset) / g_pagesize) * g_pagesize)
+
+int mfalloc(char const *filename, size_t offset, size_t length, double factor,
+            int unlink, int access_style, int file_flags, int file_perm,
+            MFILE *mfile)
 {
     int     fd             = 0;
     size_t  offset_aligned = 0;
@@ -29,7 +36,7 @@ int mfalloc(char const *filename, size_t offset, size_t length, int unlink, int 
         g_pagesize = sysconf(_SC_PAGESIZE);
     }
     
-    offset_aligned = ((size_t)(offset / (size_t)g_pagesize)) * g_pagesize;
+    offset_aligned = ALIGN_OFFSET(offset);
     
     // If file exists, check if it was requested to map the full-length of the file
     if (file_exists)
@@ -45,33 +52,52 @@ int mfalloc(char const *filename, size_t offset, size_t length, int unlink, int 
         }
     }
     
-    // Truncate the content by taking into account the offset
-    if ((offset_aligned + length) > st.st_size)
-    {
-        // Important: posix_fallocate is more efficient, but older versions of Lustre will
-        // produce unexpected results and cause errors.
-        
-        CHK(ftruncate(fd, offset_aligned + length));
-    }
-    
     // Define the mapping given the file descriptor and set the access pattern
     if (length > 0)
     {
-        const int prot = (file_flags & O_RDONLY) ? PROT_READ  :
-                         (file_flags & O_WRONLY) ? PROT_WRITE :
-                                                   (PROT_READ | PROT_WRITE | PROT_EXEC);
+        void   *addr_tmp = NULL;
+        size_t length_s  = (double)length * factor;
+        size_t length_m  = ALIGN_OFFSET(length - length_s);
+        int    prot      = (file_flags & O_RDONLY) ? PROT_READ  :
+                           (file_flags & O_WRONLY) ? PROT_WRITE :
+                                                     MMAP_PROT;
         
-        addr = mmap(NULL, length, prot, MAP_SHARED | MAP_NORESERVE, fd, offset_aligned); // Note: MAP_NORESERVE is needed to avoid swapping
-        CHKB(addr == MAP_FAILED);
+        // Update the storage length based on the aligned offset
+        length_s = length - length_m;
+    
+        // Truncate the content by taking into account the offset
+        if ((offset_aligned + length_s) > st.st_size)
+        {
+            // Important: posix_fallocate is more efficient, but older versions of Lustre will
+            // produce unexpected results and cause errors.
+            
+            CHK(ftruncate(fd, offset_aligned + length_s));
+        }
         
-        CHK(madvise(addr, length, access_style));
+        // Create an anonymous mapping to reserve the virtual addresses
+        addr = mmap(NULL, length, MMAP_PROT, MMAP_FLAGS | MAP_ANONYMOUS, -1, 0);
+        CHKB(addr == MAP_FAILED || munmap(addr, length) != MPI_SUCCESS);
+        
+        // Divide the virtual address range between memory and storage
+        if (length_m > 0)
+        {
+            addr_tmp = (char *)mmap(addr, length_m, prot,
+                                    MMAP_FLAGS | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+            CHKB(addr_tmp == MAP_FAILED);
+        }
+        
+        addr_tmp = mmap(((char *)addr) + length_m, length_s, prot, MMAP_FLAGS | MAP_FIXED, fd,
+                        offset_aligned);
+        CHKB(addr_tmp == MAP_FAILED);
+        
+        CHK(madvise(addr_tmp, length_s, access_style));
     }
  
     CHK(close(fd));
     
     // Fill the output MFILE object with the mapping details
     mfile->addr     = addr;
-    mfile->addr_src = (void *)(((char *)addr) + (offset - offset_aligned));
+    mfile->addr_src = (void *)((char *)addr + (offset - offset_aligned));
     mfile->offset   = offset_aligned;
     mfile->length   = length;
     filename_size   = sizeof(char) * (strlen(filename) + 1);
@@ -90,12 +116,12 @@ int mfsync(MFILE mfile)
 
 int mfsync_at(MFILE mfile, size_t offset, size_t length, int async)
 {
-    size_t offset_aligned = ((size_t)(offset / (size_t)g_pagesize)) * g_pagesize;
+    const size_t offset_aligned = ALIGN_OFFSET(offset);
     
     // Extend the requested length if the offset was aligned
     length += (offset - offset_aligned);
     
-    return msync(&((char*)mfile.addr)[offset_aligned], length, ((async) ? MS_ASYNC : MS_SYNC));
+    return msync((char*)mfile.addr + offset_aligned, length, ((async) ? MS_ASYNC : MS_SYNC));
 }
 
 int mffree(MFILE mfile)

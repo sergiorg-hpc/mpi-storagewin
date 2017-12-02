@@ -5,6 +5,7 @@
 #define MPI_SWIN_ALLOC_TYPE     "alloc_type"                // Defines if the window is allocated in storage ({ "memory", "storage" })
 #define MPI_SWIN_FILENAME       "storage_alloc_filename"    // Determines the file-path for the mapping
 #define MPI_SWIN_OFFSET         "storage_alloc_offset"      // Specifies the offset inside the given file or device
+#define MPI_SWIN_FACTOR         "storage_alloc_factor"      // Defines the allocation factor (i.e., the part on storage)
 #define MPI_SWIN_UNLINK         "storage_alloc_unlink"      // Allows to delete the file during window deallocation ({ "true", "false" })
 
 // MPI I/O supported keys

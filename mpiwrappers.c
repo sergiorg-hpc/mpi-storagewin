@@ -177,8 +177,8 @@ int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void *baseptr)
         
         // Create the mapping of the given file into memory
         mfile = (MFILE *)malloc(sizeof(MFILE));
-        CHK(mfalloc(info_values.filename, info_values.offset, size, info_values.unlink, info_values.access_style,
-                    info_values.file_flags, info_values.file_perm, mfile));
+        CHK(mfalloc(info_values.filename, info_values.offset, size, info_values.factor, info_values.unlink,
+                    info_values.access_style, info_values.file_flags, info_values.file_perm, mfile));
         
         // Fill the window allocation object with the mapping details (note that
         // the address returned matches the original request and is not aligned)
@@ -316,5 +316,14 @@ int MPI_Win_detach(MPI_Win win, const void *base)
     CHK(uncacheWinAlloc(win, base));
     
     return PMPI_Win_detach(win, base);
+}
+
+int MPI_Init_thread(int *argc, char ***argv, int required, int *provided)
+{
+    // Currently, the implementation only supports MPI_THREAD_SINGLE
+    *provided = MPI_THREAD_SINGLE;
+    
+    return (required == MPI_THREAD_SINGLE) ? MPI_Init(argc, argv) :
+                                             MPI_ERR_INTERN;
 }
 

@@ -36,6 +36,7 @@ typedef struct
     int     striping_factor;            // Stripe count used for new mapped files
     long    striping_unit;              // Size of the stripes used for new mapped files
     size_t  offset;                     // Offset within the file or block device where the mapping begins
+    double  factor;                     // Allocation factor that defines the part on storage
     char    filename[MPI_MAX_INFO_VAL]; // Requested filename for the mapped file or block device (full path)
 } MPI_Info_Values;
 

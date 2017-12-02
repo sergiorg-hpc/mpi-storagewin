@@ -2,21 +2,20 @@
 CC       = mpicc
 MPICC    = mpicc
 AR       = ar
-INCDIR   = -I./ -I/usr/include/mpi
+INCDIR   = -I./ -I./benchmark -I/usr/include/mpi
 LIBDIR   = -L./
 MPI_SWIN = -lmpi_swin
 CFLAGS   = $(INCDIR) $(LIBDIR)
 
-CC_CHECK      := $(shell which CC 2> /dev/null)
-PROFILE_CHECK := $(shell man mpicc 2>&1 | tee 2>&1 | grep profile= 2> /dev/null)
-LFS_CHECK     := $(shell which lfs 2> /dev/null)
+CC_CHECK  := $(shell which CC 2> /dev/null)
+LFS_CHECK := $(shell which lfs 2> /dev/null)
 
 ifdef CC_CHECK
     CC    = CC
     MPICC = CC
 endif
 
-ifdef PROFILE_CHECK
+ifdef USE_PROFILE
     MPI_SWIN = -profile=mpi_swin
 endif
 
@@ -28,34 +27,33 @@ ifdef LFS_CHECK
     DMPI_SWIN_LUSTRE  = -DMPI_SWIN_LUSTRE=1
 endif
 
-all: libmpi_swin.a mpi_swin_test.out mpi_swin_test_dynamic.out
+all: mpi_swin_test.out mpi_swin_test_dynamic.out mstream.out
 
-mpi_swin_test.out:  libmpi_swin.a mpi_swin_test.o
-	@$(MPICC) $(CFLAGS) $(MPI_SWIN) -o mpi_swin_test.out mpi_swin_test.o
+mstream.out:  libmpi_swin.a
+	@$(MPICC) $(CFLAGS) $(MPI_SWIN) benchmark/mstream.c \
+									-o benchmark/mstream.out
 
-mpi_swin_test_dynamic.out:  libmpi_swin.a mpi_swin_test_dynamic.o
-	@$(MPICC) $(CFLAGS) $(MPI_SWIN) -o mpi_swin_test_dynamic.out mpi_swin_test_dynamic.o
+mpi_swin_test.out:  libmpi_swin.a
+	@$(MPICC) $(CFLAGS) $(MPI_SWIN) mpi_swin_test.c -o mpi_swin_test.out
 
-mpi_swin_test.o:  mpi_swin_test.c mfile.h mpi_swin_keys.h common.h
-	@$(CC) $(CFLAGS) -c mpi_swin_test.c
-	
-mpi_swin_test_dynamic.o:  mpi_swin_test_dynamic.c mfile.h mpi_swin_keys.h common.h
-	@$(CC) $(CFLAGS) -c mpi_swin_test_dynamic.c
-	
+mpi_swin_test_dynamic.out:  libmpi_swin.a
+	@$(MPICC) $(CFLAGS) $(MPI_SWIN) mpi_swin_test_dynamic.c \
+									-o mpi_swin_test_dynamic.out
+
 libmpi_swin.a: mpiwrappers.o mpiwrappers_util.o mfile.o
 	@$(AR) -cq libmpi_swin.a mpiwrappers*.o mfile.o
 	
-mpiwrappers.o:  mpiwrappers.c mpiwrappers.h mfile.h common.h
+mpiwrappers.o:
 	@$(CC) $(CFLAGS) $(DMPI_SWIN_LUSTRE) -c mpiwrappers.c
 	
-mpiwrappers_util.o:  mpiwrappers_util.c mpiwrappers_util.h common.h
+mpiwrappers_util.o:
 	@$(CC) $(CFLAGS) -c mpiwrappers_util.c
 	
-mfile.o:  mfile.c mfile.h common.h
+mfile.o:
 	@$(CC) $(CFLAGS) -c mfile.c
 
 clean: 
-	@$(RM) *.out *.o *.a *~ *.tmp *.win
+	@$(RM) *.out benchmark/*.out *.o *.a *~ *.tmp *.win
 
 rebuild: clean all
 
