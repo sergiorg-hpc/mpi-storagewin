@@ -13,7 +13,9 @@ In addition, certain performance hints have to be provided to `MPI_Win_allocate`
 - `alloc_type`. This hint can be set to "`storage`" to enable the MPI window allocation on storage. Otherwise, the window will be allocated in memory (default).
 - `storage_alloc_filename`. Defines the path and the name of the target file or block device. Relative paths are supported as well.
 - `storage_alloc_offset`. Identifies the MPI storage window starting point inside a file, but is also valid when targeting block devices directly.
-- `storage_alloc_factor`. Enables *combined* window allocations, where a single virtual address space contains both memory and storage. A value of "`0.5`" would associate the first half of the addresses into memory, and the second half into storage.
+- `storage_alloc_factor`. Enables *combined* window allocations, where a single virtual address space contains both memory and storage. A value of "`0.5`" would associate the first half of the addresses into memory, and the second half into storage. Using "`auto`" would set the correct allocation factor if the requested window size exceeds the main memory capacity.
+- `storage_alloc_order`. Defines the order of the allocation when using the
+combined window allocations. A value of "`memory_first`" sets the first part of the address space into memory, and the rest into storage (default).
 - `storage_alloc_unlink`. If set to "`true`", it removes the associated file during the deallocation of an MPI storage window (i.e., useful for writing temporary files).
 - `storage_alloc_discard`. If set to "`true`", avoids to synchronize to storage the recent changes during the deallocation of the MPI storage window.
 
