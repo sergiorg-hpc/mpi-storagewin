@@ -1,6 +1,6 @@
 
-CC       = mpicc
-MPICC    = mpicc
+CC       = mpicc -std=c99
+MPICC    = mpicc -std=c99
 AR       = ar
 INCDIR   = -I./ -I./benchmark -I/usr/include/mpi
 LIBDIR   = -L./

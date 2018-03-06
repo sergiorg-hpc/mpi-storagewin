@@ -100,6 +100,7 @@ int parseInfo(MPI_Info info, MPI_Info_Values *values)
     values->striping_unit   = 0;
     values->offset          = 0;
     values->factor          = 1.0;
+    values->order           = 0;
     values->filename[0]     = '\0';
     
     // If we find the "alloc_type" flag and it's set to "storage", retrieve the settings
@@ -120,7 +121,19 @@ int parseInfo(MPI_Info info, MPI_Info_Values *values)
         
         if (getInfoValue(info, MPI_SWIN_FACTOR, info_value))
         {
-            sscanf(info_value, "%lf", &values->factor);
+            if (!strcmp(info_value, "auto"))
+            {
+                values->factor = -1.0;
+            }
+            else
+            {
+                sscanf(info_value, "%lf", &values->factor);
+            }
+        }
+        
+        if (getInfoValue(info, MPI_SWIN_ORDER, info_value))
+        {
+            values->order = !strcmp(info_value, "storage_first");
         }
         
         if (getInfoValue(info, MPI_SWIN_UNLINK, info_value))

@@ -11,6 +11,11 @@
 // PRIVATE DEFINITIONS & METHODS //
 ///////////////////////////////////
 
+typedef struct sysinfo sysinfo_t;
+
+#define CONV_MB(length)  (length >> 20)
+#define MEM_LIMIT_FACTOR 0.921
+
 /**
  * Helper method that allows to release a window allocation based on storage
  * or memory (default).
@@ -125,6 +130,26 @@ int uncacheWinAlloc(MPI_Win win, const void* base)
     return MPI_SUCCESS;
 }
 
+double calculateFactor(MPI_Aint size)
+{
+    sysinfo_t sinfo     = { 0 };
+    size_t    mem_req   = CONV_MB(size);
+    size_t    mem_total = 0;
+    size_t    mem_limit = 0;
+    size_t    mem_used  = 0;
+    size_t    mem_check = 0;
+    
+    sysinfo(&sinfo);
+    mem_total = CONV_MB(sinfo.totalram * sinfo.mem_unit);
+    mem_limit = (double)mem_total * MEM_LIMIT_FACTOR;
+    mem_used  = CONV_MB((sinfo.totalram - sinfo.freeram) * sinfo.mem_unit);
+    mem_check = (mem_used + mem_req);
+    
+    return (mem_used  > mem_limit) ? 1.0 :
+           (mem_check < mem_limit) ? 0.0 :
+                                     ((double)(mem_check - mem_limit) / (double)mem_req);
+}
+
 
 //////////////////////////////////
 // PUBLIC DEFINITIONS & METHODS //
@@ -143,7 +168,14 @@ int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void *baseptr)
     // in traditional RAM memory or storage
     parseInfo(info, &info_values);
     
-    if (info_values.alloc_type == MPI_WIN_ALLOC_STORAGE)
+    // Check if we have to calculate the factor (i.e., it was set to "auto")
+    if (info_values.factor < 0.0f)
+    {
+        info_values.factor = calculateFactor(size);
+    }
+     
+    // Make sure that the allocation type and factor are correctly set
+    if (info_values.alloc_type == MPI_WIN_ALLOC_STORAGE && info_values.factor > 0.0f)
     {
         MFILE *mfile = NULL;
         
@@ -167,9 +199,9 @@ int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void *baseptr)
             
             char lfs_command[PATH_MAX];
             
-            sprintf(lfs_command, "lfs setstripe -c %d -s %ld %s", info_values.striping_factor,
-                                                                  info_values.striping_unit,
-                                                                  info_values.filename);
+            sprintf(lfs_command, "lfs setstripe --stripe-count=%d --stripe-size=%ld %s", info_values.striping_factor,
+                                                                                         info_values.striping_unit,
+                                                                                         info_values.filename);
             
             CHK(system(lfs_command));
         }
@@ -177,8 +209,10 @@ int MPI_Alloc_mem(MPI_Aint size, MPI_Info info, void *baseptr)
         
         // Create the mapping of the given file into memory
         mfile = (MFILE *)malloc(sizeof(MFILE));
-        CHK(mfalloc(info_values.filename, info_values.offset, size, info_values.factor, info_values.unlink,
-                    info_values.access_style, info_values.file_flags, info_values.file_perm, mfile));
+        CHK(mfalloc(info_values.filename, info_values.offset, size,
+                    info_values.factor, info_values.order, info_values.unlink,
+                    info_values.access_style, info_values.file_flags,
+                    info_values.file_perm, mfile));
         
         // Fill the window allocation object with the mapping details (note that
         // the address returned matches the original request and is not aligned)

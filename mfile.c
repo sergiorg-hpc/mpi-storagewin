@@ -11,8 +11,8 @@ size_t g_pagesize = 0;
 #define ALIGN_OFFSET(offset) (((offset) / g_pagesize) * g_pagesize)
 
 int mfalloc(char const *filename, size_t offset, size_t length, double factor,
-            int unlink, int access_style, int file_flags, int file_perm,
-            MFILE *mfile)
+            int order, int unlink, int access_style, int file_flags,
+            int file_perm, MFILE *mfile)
 {
     int     fd             = 0;
     size_t  offset_aligned = 0;
@@ -57,13 +57,22 @@ int mfalloc(char const *filename, size_t offset, size_t length, double factor,
     {
         void   *addr_tmp = NULL;
         size_t length_s  = (double)length * factor;
-        size_t length_m  = ALIGN_OFFSET(length - length_s);
+        size_t length_m  = 0;
         int    prot      = (file_flags & O_RDONLY) ? PROT_READ  :
                            (file_flags & O_WRONLY) ? PROT_WRITE :
                                                      MMAP_PROT;
         
         // Update the storage length based on the aligned offset
-        length_s = length - length_m;
+        if (order == 0)
+        {
+            length_m = ALIGN_OFFSET(length - length_s);
+            length_s = length - length_m;
+        }
+        else
+        {
+            length_s = ALIGN_OFFSET(length_s);
+            length_m = length - length_s;
+        }
     
         // Truncate the content by taking into account the offset
         if ((offset_aligned + length_s) > st.st_size)
@@ -79,18 +88,36 @@ int mfalloc(char const *filename, size_t offset, size_t length, double factor,
         CHKB(addr == MAP_FAILED || munmap(addr, length) != MPI_SUCCESS);
         
         // Divide the virtual address range between memory and storage
-        if (length_m > 0)
+        if (order == 0)
         {
-            addr_tmp = (char *)mmap(addr, length_m, prot,
-                                    MMAP_FLAGS | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+            if (length_m > 0)
+            {
+                addr_tmp = (char *)mmap(addr, length_m, prot,
+                                        MMAP_FLAGS | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+                CHKB(addr_tmp == MAP_FAILED);
+            }
+            
+            addr_tmp = mmap(((char *)addr) + length_m, length_s, prot, MMAP_FLAGS | MAP_FIXED, fd,
+                            offset_aligned);
             CHKB(addr_tmp == MAP_FAILED);
+        
+            CHK(madvise(addr_tmp, length_s, access_style));
         }
+        else
+        {
+            addr_tmp = mmap(addr, length_s, prot, MMAP_FLAGS | MAP_FIXED, fd,
+                            offset_aligned);
+            CHKB(addr_tmp == MAP_FAILED);
         
-        addr_tmp = mmap(((char *)addr) + length_m, length_s, prot, MMAP_FLAGS | MAP_FIXED, fd,
-                        offset_aligned);
-        CHKB(addr_tmp == MAP_FAILED);
-        
-        CHK(madvise(addr_tmp, length_s, access_style));
+            CHK(madvise(addr_tmp, length_s, access_style));
+            
+            if (length_m > 0)
+            {
+                addr_tmp = (char *)mmap(((char *)addr) + length_s, length_m, prot,
+                                        MMAP_FLAGS | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+                CHKB(addr_tmp == MAP_FAILED);
+            }
+        }
     }
  
     CHK(close(fd));
